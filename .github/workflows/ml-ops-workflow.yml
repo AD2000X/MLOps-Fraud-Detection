@@ -1,69 +1,341 @@
-name: Fraud Detection CI/CD
+name: MLOps CI/CD Pipeline
 
 on:
   push:
-    branches:
-      - main
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
   schedule:
-    - cron: '0 0 1 * *'  # Run monthly on the 1st day of the month
+    # Automatically retrain the model on the 1st of each month (UTC time 00:00)
+    - cron: '0 0 1 * *'
+  workflow_dispatch:  # Allow manual triggering
+
+env:
+  DOCKER_IMAGE_NAME: fraud-detector
+  PYTHON_VERSION: '3.9'
 
 jobs:
-
-  build:
+  # ==========================================
+  # Job 1: Code Inspection
+  # ==========================================
+  code-quality:
+    name: Code Quality Check
     runs-on: ubuntu-latest
-
+    
     steps:
-    - uses: actions/checkout@v3
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        lfs: true  # Important: pull LFS archives
+    
+    - name: Checkout LFS objects
+      run: git lfs pull
+    
     - name: Set up Python
       uses: actions/setup-python@v4
       with:
-        python-version: 3.9
+        python-version: ${{ env.PYTHON_VERSION }}
+    
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
-    - name: Train and evaluate model
+    
+    - name: Check Python syntax
+      run: |
+        echo "Checking model.py syntax..."
+        python -m py_compile model/model.py
+        echo "Checking app.py syntax..."
+        python -m py_compile api/app.py
+        echo "✅ All Python files are valid!"
+
+  # ==========================================
+  # Job 2: Train and evaluate the model
+  # ==========================================
+  train-model:
+    name: Train and Evaluate Model
+    runs-on: ubuntu-latest
+    needs: code-quality
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        lfs: true
+    
+    - name: Checkout LFS objects
+      run: git lfs pull
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+    
+    - name: Cache pip dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+    
+    - name: Train ML Model
       env:
         DATA_PATH: ${{ github.workspace }}/data/creditcard.csv
         MODEL_SAVE_PATH: ${{ github.workspace }}/model/saved_models/model.pkl
       run: |
+        echo "🚀 Starting model training..."
         python model/model.py
-    - name: Upload model artifacts
+        echo "✅ Model training completed!"
+    
+    - name: Verify model file exists
+      run: |
+        if [ -f "model/saved_models/model.pkl" ]; then
+          echo "✅ Model file created successfully"
+          ls -lh model/saved_models/model.pkl
+        else
+          echo "❌ Model file not found!"
+          exit 1
+        fi
+    
+    - name: Upload trained model
       uses: actions/upload-artifact@v3
       with:
-        name: model-artifacts
-        path: |
-          model/saved_models/model.pkl
-          mlruns/
+        name: trained-model
+        path: model/saved_models/model.pkl
+        retention-days: 30
+    
+    - name: Upload MLflow artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: mlflow-runs
+        path: mlruns/
+        retention-days: 30
 
-  deploy:
-    needs: build
+  # ==========================================
+  # Job 3: Build and test Docker
+  # ==========================================
+  build-and-test-docker:
+    name: Build and Test Docker Image
     runs-on: ubuntu-latest
-
+    needs: train-model
+    
     steps:
-    - uses: actions/checkout@v3
+    - name: Checkout code
+      uses: actions/checkout@v4
       with:
         lfs: true
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: 3.9
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
-    - name: Download model artifacts
+    
+    - name: Checkout LFS objects
+      run: git lfs pull
+    
+    - name: Download trained model
       uses: actions/download-artifact@v3
       with:
-        name: model-artifacts
-        path: .
+        name: trained-model
+        path: model/saved_models/
+    
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+    
     - name: Build Docker image
-      run: docker build -t fraud-detection-app .
-    - name: Deploy to VPS
-      env:
-        VPS_HOST: ${{ secrets.VPS_HOST }}
-        VPS_USER: ${{ secrets.VPS_USER }}
-        VPS_PASSWORD: ${{ secrets.VPS_PASSWORD }}
       run: |
-        docker save fraud-detection-app | bzip2 | ssh $VPS_USER@$VPS_HOST 'bunzip2 | docker load'
-        ssh $VPS_USER@$VPS_HOST 'docker run -d --rm --name fraud-detection-app -p 8000:8000 fraud-detection-app'
+        echo "🐋 Building Docker image..."
+        docker build -f api/Dockerfile -t ${{ env.DOCKER_IMAGE_NAME }}:latest .
+        echo "✅ Docker image built successfully!"
+        docker images | grep ${{ env.DOCKER_IMAGE_NAME }}
+    
+    - name: Test Docker container
+      run: |
+        echo "🧪 Starting Docker container for testing..."
+        docker run -d -p 8000:8000 --name test-container ${{ env.DOCKER_IMAGE_NAME }}:latest
+        
+        echo "⏳ Waiting for container to be ready..."
+        sleep 20
+        
+        echo "📋 Container logs:"
+        docker logs test-container
+        
+        echo "🔍 Checking if container is running..."
+        docker ps | grep test-container || (echo "❌ Container not running!" && exit 1)
+        
+        echo "🧹 Cleaning up..."
+        docker stop test-container
+        docker rm test-container
+        
+        echo "✅ Docker container test passed!"
+    
+    - name: Save Docker image
+      run: |
+        echo "💾 Saving Docker image..."
+        docker save ${{ env.DOCKER_IMAGE_NAME }}:latest | gzip > docker-image.tar.gz
+        ls -lh docker-image.tar.gz
+    
+    - name: Upload Docker image artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: docker-image
+        path: docker-image.tar.gz
+        retention-days: 7
+
+  # ==========================================
+  # Job 4: Push to Docker Hub
+  # ==========================================
+  push-to-docker-hub:
+    name: Push to Docker Hub
+    runs-on: ubuntu-latest
+    needs: build-and-test-docker
+    # Only execute when pushing to main and secrets are set
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    
+    steps:
+    - name: Download Docker image
+      uses: actions/download-artifact@v3
+      with:
+        name: docker-image
+    
+    - name: Load Docker image
+      run: |
+        echo "📦 Loading Docker image..."
+        docker load < docker-image.tar.gz
+        docker images
+    
+    - name: Log in to Docker Hub
+      if: ${{ secrets.DOCKER_USERNAME != '' && secrets.DOCKER_PASSWORD != '' }}
+      uses: docker/login-action@v3
+      with:
+        username: ${{ secrets.DOCKER_USERNAME }}
+        password: ${{ secrets.DOCKER_PASSWORD }}
+    
+    - name: Tag and Push to Docker Hub
+      if: ${{ secrets.DOCKER_USERNAME != '' && secrets.DOCKER_PASSWORD != '' }}
+      run: |
+        echo "🏷️  Tagging image..."
+        docker tag ${{ env.DOCKER_IMAGE_NAME }}:latest ${{ secrets.DOCKER_USERNAME }}/${{ env.DOCKER_IMAGE_NAME }}:latest
+        docker tag ${{ env.DOCKER_IMAGE_NAME }}:latest ${{ secrets.DOCKER_USERNAME }}/${{ env.DOCKER_IMAGE_NAME }}:${{ github.sha }}
+        
+        echo "⬆️  Pushing to Docker Hub..."
+        docker push ${{ secrets.DOCKER_USERNAME }}/${{ env.DOCKER_IMAGE_NAME }}:latest
+        docker push ${{ secrets.DOCKER_USERNAME }}/${{ env.DOCKER_IMAGE_NAME }}:${{ github.sha }}
+        
+        echo "✅ Images pushed successfully!"
+    
+    - name: Skip Docker Hub push
+      if: ${{ secrets.DOCKER_USERNAME == '' || secrets.DOCKER_PASSWORD == '' }}
+      run: |
+        echo "⏭️  Skipping Docker Hub push (secrets not configured)"
+        echo "To enable, add DOCKER_USERNAME and DOCKER_PASSWORD secrets"
+
+  # ==========================================
+  # Job 5: Deployment Summary
+  # ==========================================
+  deployment-summary:
+    name: Pipeline Summary
+    runs-on: ubuntu-latest
+    needs: [code-quality, train-model, build-and-test-docker]
+    if: always()
+    
+    steps:
+    - name: Display Pipeline Results
+      run: |
+        echo "=========================================="
+        echo "🎯 CI/CD Pipeline Execution Summary"
+        echo "=========================================="
+        echo ""
+        echo "📊 Job Results:"
+        echo "  • Code Quality:     ${{ needs.code-quality.result }}"
+        echo "  • Model Training:   ${{ needs.train-model.result }}"
+        echo "  • Docker Build:     ${{ needs.build-and-test-docker.result }}"
+        echo ""
+        echo "=========================================="
+        
+        if [ "${{ needs.code-quality.result }}" != "success" ] || \
+           [ "${{ needs.train-model.result }}" != "success" ] || \
+           [ "${{ needs.build-and-test-docker.result }}" != "success" ]; then
+          echo "❌ Pipeline FAILED!"
+          echo ""
+          echo "Please check the failed jobs above for details."
+          exit 1
+        else
+          echo "✅ Pipeline SUCCEEDED!"
+          echo ""
+          echo "🎉 All jobs completed successfully!"
+          echo "📦 Artifacts are available for download"
+        fi
+
+
+
+# name: Fraud Detection CI/CD
+
+# on:
+#   push:
+#     branches:
+#       - main
+#   schedule:
+#     - cron: '0 0 1 * *'  # Run monthly on the 1st day of the month
+
+# jobs:
+
+#   build:
+#     runs-on: ubuntu-latest
+
+#     steps:
+#     - uses: actions/checkout@v3
+#     - name: Set up Python
+#       uses: actions/setup-python@v4
+#       with:
+#         python-version: 3.9
+#     - name: Install dependencies
+#       run: |
+#         python -m pip install --upgrade pip
+#         pip install -r requirements.txt
+#     - name: Train and evaluate model
+#       env:
+#         DATA_PATH: ${{ github.workspace }}/data/creditcard.csv
+#         MODEL_SAVE_PATH: ${{ github.workspace }}/model/saved_models/model.pkl
+#       run: |
+#         python model/model.py
+#     - name: Upload model artifacts
+#       uses: actions/upload-artifact@v3
+#       with:
+#         name: model-artifacts
+#         path: |
+#           model/saved_models/model.pkl
+#           mlruns/
+
+#   deploy:
+#     needs: build
+#     runs-on: ubuntu-latest
+
+#     steps:
+#     - uses: actions/checkout@v3
+#       with:
+#         lfs: true
+#     - name: Set up Python
+#       uses: actions/setup-python@v4
+#       with:
+#         python-version: 3.9
+#     - name: Install dependencies
+#       run: |
+#         python -m pip install --upgrade pip
+#         pip install -r requirements.txt
+#     - name: Download model artifacts
+#       uses: actions/download-artifact@v3
+#       with:
+#         name: model-artifacts
+#         path: .
+#     - name: Build Docker image
+#       run: docker build -t fraud-detection-app .
+#     - name: Deploy to VPS
+#       env:
+#         VPS_HOST: ${{ secrets.VPS_HOST }}
+#         VPS_USER: ${{ secrets.VPS_USER }}
+#         VPS_PASSWORD: ${{ secrets.VPS_PASSWORD }}
+#       run: |
+#         docker save fraud-detection-app | bzip2 | ssh $VPS_USER@$VPS_HOST 'bunzip2 | docker load'
+#         ssh $VPS_USER@$VPS_HOST 'docker run -d --rm --name fraud-detection-app -p 8000:8000 fraud-detection-app'

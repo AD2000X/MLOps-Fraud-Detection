@@ -111,16 +111,17 @@ jobs:
       - name: Test model loading
         run: |
           python -c "
-          import pickle
+          import joblib
           import sklearn
           print(f'scikit-learn version: {sklearn.__version__}')
-          print('Loading model...')
-          with open('model/saved_models/model.pkl', 'rb') as f:
-              model = pickle.load(f)
+          print('Loading model with joblib...')
+          model = joblib.load('model/saved_models/model.pkl')
           print('✓ Model loaded successfully')
           print(f'Model type: {type(model).__name__}')
+          if hasattr(model, 'n_estimators'):
+              print(f'Number of trees: {model.n_estimators}')
           print('✓ Model validation passed')
-          "
+    "
       
       - name: Upload model artifact
         uses: actions/upload-artifact@v4

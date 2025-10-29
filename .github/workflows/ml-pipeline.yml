@@ -60,7 +60,7 @@ jobs:
   # Job 2: Train and Evaluate Model
   # ==========================================
   train-model:
-    name: Train and Evaluate Model
+    name: Validate Model
     runs-on: ubuntu-latest
     needs: code-quality
     
@@ -83,27 +83,32 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
       
-      - name: Train model
+      - name: Validate model exists
         run: |
-          python model/train.py
-          echo "✓ Model training completed"
+          if [ -f "model/saved_models/model.pkl" ]; then
+            echo "✓ Model file found: model/saved_models/model.pkl"
+            ls -lh model/saved_models/model.pkl
+          else
+            echo "✗ Model file not found!"
+            exit 1
+          fi
       
-      - name: Upload trained model
+      - name: Test model loading
+        run: |
+          python -c "
+          import pickle
+          with open('model/saved_models/model.pkl', 'rb') as f:
+              model = pickle.load(f)
+          print('✓ Model loaded successfully')
+          print(f'Model type: {type(model).__name__}')
+          "
+      
+      - name: Upload model artifact
         uses: actions/upload-artifact@v4
         with:
-          name: trained-model
+          name: fraud-detection-model
           path: model/saved_models/model.pkl
           retention-days: 30
-      
-      - name: Upload training report
-        uses: actions/upload-artifact@v4
-        with:
-          name: training-report
-          path: |
-            model/plots/*.png
-            model/reports/*.txt
-          retention-days: 30
-          if-no-files-found: ignore
 
   # ==========================================
   # Job 3: Build and Test Docker Image

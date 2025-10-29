@@ -10,4 +10,5 @@ COPY . .
 ENV DATA_PATH=./data/creditcard.csv
 ENV MODEL_SAVE_PATH=./model/saved_models/model.pkl
 
-CMD ["python", "model/model.py"]
+# CMD ["python", "model/model.py"]
+CMD ["python", "api/app.py"]

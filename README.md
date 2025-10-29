@@ -9,7 +9,7 @@
 
 > A complete MLOps credit card fraud detection system featuring model training, API deployment, CI/CD automation, and real-time monitoring.
 
-![Grafana Dashboard](docs/images/grafana-dashboard.jpg)
+![Grafana Dashboard](docs/images/grafana.jpg)
 
 ---
 

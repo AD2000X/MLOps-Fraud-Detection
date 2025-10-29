@@ -112,6 +112,116 @@ To track models using MLflow, ensure MLflow server is running and accessible. Th
 mlflow ui
 ```
 
+
+## Monitoring
+
+This project uses Prometheus and Grafana for real-time monitoring.
+
+### 📊 Grafana Dashboard
+
+![Grafana Dashboard](docs/images/grafana-dashboard.jpg)
+
+The complete monitoring dashboard includes:
+
+- **Total Predictions**: 167 predictions
+
+- **Fraud vs Normal**: Fraud 38% vs Normal 62%
+
+- **Model Accuracy**: 99.96% accuracy
+
+- **Average Latency**: 13.5ms response time
+
+- **Predictions Over Time**: Real-time trend chart
+
+### 🎯 Prometheus Monitoring
+
+#### Targets Status
+
+![Prometheus Targets](docs/images/prometheus-targets.jpg)
+
+Prometheus successfully monitored the following services:
+
+- ✅ `fraud-detection-api` - UP (http://fraud-detector:8000/metrics)
+
+- ✅ `prometheus` - UP (http://localhost:9090/metrics)
+
+#### Query Examples
+
+**Fraud Predictions:**
+
+![Fraud Predictions](docs/images/prometheus-query-fraud.jpg)
+
+**Normal Predictions:**
+
+![Normal Predictions](docs/images/prometheus-query-normal.jpg)
+
+**Service Discovery:**
+
+![Service Discovery](docs/images/prometheus-service-discovery.jpg)
+
+### Monitoring Metrics
+
+| Metric | Description | Current Value | Query |
+
+|------|------|--------|---------|
+
+| **Total Predictions** | Total Predictions | 167 | `sum(fraud_predictions_total)` |
+
+| **Fraud Rate** | Fraud Detection Rate | 38% | `fraud_predictions_total{prediction_result="fraud"}` |
+
+| **Model Accuracy** | Model accuracy | 99.96% | `fraud_model_accuracy` |
+
+| **Avg Latency** | Average response time | 13.5ms | `fraud_prediction_latency_seconds_sum / fraud_prediction_latency_seconds_count` |
+
+### Start the monitoring system
+
+```bash
+cd monitoring
+docker-compose up -d
+
+```
+
+### Access the monitoring panel
+
+- **Grafana Dashboard**: http://localhost:3000
+
+- Username: `admin`
+
+- Password: `admin`
+
+- **Prometheus UI**: http://localhost:9090
+
+- **API Metrics**: http://localhost:8000/metrics
+
+### Commonly used PromQL queries
+
+```promql
+
+# Prediction rate per minute
+
+rate(fraud_predictions_total[1m]) * 60
+
+# Fraud detections in the past hour
+
+increase(fraud_predictions_total{prediction_result="fraud"}[1h])
+
+# Fraud rate
+
+fraud_predictions_total{prediction_result="fraud"} / sum(fraud_predictions_total) * 100
+
+# P95 latency
+
+histogram_quantile(0.95, rate(fraud_prediction_latency_seconds_bucket[5m]))
+
+```
+
+### Stop monitoring
+
+```bash
+docker-compose down
+```
+
+
 ## License
 This project is licensed under the terms of the MIT License
 

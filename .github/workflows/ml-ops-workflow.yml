@@ -24,7 +24,7 @@ jobs:
     
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v3
       with:
         lfs: true  # Important: pull LFS archives
     
@@ -32,7 +32,7 @@ jobs:
       run: git lfs pull
     
     - name: Set up Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v3
       with:
         python-version: ${{ env.PYTHON_VERSION }}
     
@@ -59,7 +59,7 @@ jobs:
     
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v3
       with:
         lfs: true
     
@@ -67,7 +67,7 @@ jobs:
       run: git lfs pull
     
     - name: Set up Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v3
       with:
         python-version: ${{ env.PYTHON_VERSION }}
     
@@ -104,14 +104,14 @@ jobs:
         fi
     
     - name: Upload trained model
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: trained-model
         path: model/saved_models/model.pkl
         retention-days: 30
     
     - name: Upload MLflow artifacts
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: mlflow-runs
         path: mlruns/
@@ -127,7 +127,7 @@ jobs:
     
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v3
       with:
         lfs: true
     
@@ -135,7 +135,7 @@ jobs:
       run: git lfs pull
     
     - name: Download trained model
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@4
       with:
         name: trained-model
         path: model/saved_models/
@@ -177,7 +177,7 @@ jobs:
         ls -lh docker-image.tar.gz
     
     - name: Upload Docker image artifact
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: docker-image
         path: docker-image.tar.gz
@@ -195,7 +195,7 @@ jobs:
     
     steps:
     - name: Download Docker image
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: docker-image
     

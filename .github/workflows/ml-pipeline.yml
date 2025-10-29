@@ -71,7 +71,30 @@ jobs:
           lfs: true
       
       - name: Pull LFS files
-        run: git lfs pull
+        run: |
+          git lfs install
+          git lfs pull --include="model/saved_models/model.pkl"
+          echo "✓ LFS files pulled"
+      
+      - name: Verify model file
+        run: |
+          echo "=== Checking model file ==="
+          if [ ! -f "model/saved_models/model.pkl" ]; then
+            echo "✗ Model file not found!"
+            exit 1
+          fi
+          
+          file_size=$(stat -f%z "model/saved_models/model.pkl" 2>/dev/null || stat -c%s "model/saved_models/model.pkl")
+          echo "Model file size: $((file_size / 1024 / 1024)) MB"
+          
+          # Check if it's a real file (not LFS pointer)
+          if [ "$file_size" -lt 1000 ]; then
+            echo "✗ Model file is too small - might be LFS pointer!"
+            cat model/saved_models/model.pkl
+            exit 1
+          fi
+          
+          echo "✓ Model file looks valid"
       
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -83,24 +106,20 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
       
-      - name: Validate model exists
-        run: |
-          if [ -f "model/saved_models/model.pkl" ]; then
-            echo "✓ Model file found: model/saved_models/model.pkl"
-            ls -lh model/saved_models/model.pkl
-          else
-            echo "✗ Model file not found!"
-            exit 1
-          fi
-      
       - name: Test model loading
         run: |
           python -c "
           import pickle
+          print('Loading model...')
           with open('model/saved_models/model.pkl', 'rb') as f:
               model = pickle.load(f)
           print('✓ Model loaded successfully')
           print(f'Model type: {type(model).__name__}')
+          
+          # Check model methods
+          assert hasattr(model, 'predict'), 'Model missing predict method'
+          assert hasattr(model, 'predict_proba'), 'Model missing predict_proba method'
+          print('✓ Model validation passed')
           "
       
       - name: Upload model artifact
@@ -203,3 +222,4 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Workflow triggered by:** ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
           echo "**Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          

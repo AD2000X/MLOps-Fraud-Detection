@@ -121,7 +121,7 @@ jobs:
           if hasattr(model, 'n_estimators'):
               print(f'Number of trees: {model.n_estimators}')
           print('✓ Model validation passed')
-    "
+          "
       
       - name: Upload model artifact
         uses: actions/upload-artifact@v4

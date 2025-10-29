@@ -135,7 +135,7 @@ jobs:
       run: git lfs pull
     
     - name: Download trained model
-      uses: actions/download-artifact@4
+      uses: actions/download-artifact@v4
       with:
         name: trained-model
         path: model/saved_models/

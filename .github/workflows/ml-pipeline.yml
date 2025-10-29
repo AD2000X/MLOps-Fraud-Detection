@@ -1,0 +1,200 @@
+name: ML Pipeline
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'api/**'
+      - 'model/**'
+      - 'data/**'
+      - 'requirements.txt'
+      - 'Dockerfile'
+      - '.github/workflows/ml-pipeline.yml'
+  
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'api/**'
+      - 'model/**'
+      - 'requirements.txt'
+  
+  schedule:
+    - cron: '0 0 1 * *'  # Automatically retrain on the 1st of each month
+  
+  workflow_dispatch:  # Manually trigger
+
+env:
+  PYTHON_VERSION: '3.9'
+
+jobs:
+  # ==========================================
+  # Job 1: Code Quality Check
+  # ==========================================
+  code-quality:
+    name: Code Quality Check
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      
+      - name: Check Python syntax
+        run: |
+          python -m py_compile api/app.py
+          python -m py_compile model/train.py
+          echo "✓ Python syntax check passed"
+
+  # ==========================================
+  # Job 2: Train and Evaluate Model
+  # ==========================================
+  train-model:
+    name: Train and Evaluate Model
+    runs-on: ubuntu-latest
+    needs: code-quality
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+      
+      - name: Pull LFS files
+        run: git lfs pull
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      
+      - name: Train model
+        run: |
+          python model/train.py
+          echo "✓ Model training completed"
+      
+      - name: Upload trained model
+        uses: actions/upload-artifact@v4
+        with:
+          name: trained-model
+          path: model/saved_models/model.pkl
+          retention-days: 30
+      
+      - name: Upload training report
+        uses: actions/upload-artifact@v4
+        with:
+          name: training-report
+          path: |
+            model/plots/*.png
+            model/reports/*.txt
+          retention-days: 30
+          if-no-files-found: ignore
+
+  # ==========================================
+  # Job 3: Build and Test Docker Image
+  # ==========================================
+  build-and-test-docker:
+    name: Build and Test Docker
+    runs-on: ubuntu-latest
+    needs: train-model
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+      
+      - name: Download trained model
+        uses: actions/download-artifact@v4
+        with:
+          name: trained-model
+          path: model/saved_models/
+      
+      - name: Build Docker image
+        run: |
+          docker build -t fraud-detector:latest .
+          echo "✓ Docker image built successfully"
+      
+      - name: Run Docker container
+        run: |
+          docker run -d -p 8000:8000 \
+            -e AUTH_USERNAME=admin \
+            -e AUTH_PASSWORD=password \
+            --name fraud-detector-test \
+            fraud-detector:latest
+          echo "✓ Container started"
+          sleep 10
+      
+      - name: Test API health
+        run: |
+          response=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/)
+          if [ $response -eq 200 ] || [ $response -eq 401 ]; then
+            echo "✓ API is healthy (HTTP $response)"
+          else
+            echo "✗ API health check failed (HTTP $response)"
+            exit 1
+          fi
+      
+      - name: Test metrics endpoint
+        run: |
+          response=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/metrics)
+          if [ $response -eq 200 ]; then
+            echo "✓ Metrics endpoint is accessible"
+          else
+            echo "✗ Metrics endpoint failed (HTTP $response)"
+            exit 1
+          fi
+      
+      - name: View container logs
+        if: always()
+        run: |
+          echo "=== Container Logs ==="
+          docker logs fraud-detector-test
+      
+      - name: Stop container
+        if: always()
+        run: docker stop fraud-detector-test || true
+
+  # ==========================================
+  # Job 4: Pipeline Summary
+  # ==========================================
+  pipeline-summary:
+    name: Pipeline Summary
+    runs-on: ubuntu-latest
+    needs: [code-quality, train-model, build-and-test-docker]
+    if: always()
+    
+    steps:
+      - name: Generate summary
+        run: |
+          echo "# ML Pipeline Execution Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Pipeline Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Stage | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Code Quality | ${{ needs.code-quality.result == 'success' && '✅ Passed' || '❌ Failed' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Model Training | ${{ needs.train-model.result == 'success' && '✅ Passed' || '❌ Failed' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Docker Build & Test | ${{ needs.build-and-test-docker.result == 'success' && '✅ Passed' || '❌ Failed' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Artifacts Available" >> $GITHUB_STEP_SUMMARY
+          echo "- Trained Model" >> $GITHUB_STEP_SUMMARY
+          echo "- Training Reports" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Workflow triggered by:** ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY

@@ -25,6 +25,7 @@ on:
 
 env:
   PYTHON_VERSION: '3.9'
+  SCIKIT_LEARN_VERSION: '1.3.0'
 
 jobs:
   # ==========================================
@@ -65,15 +66,15 @@ jobs:
     needs: code-quality
     
     steps:
-      - name: Checkout code (without LFS)
+      - name: Checkout code with LFS
         uses: actions/checkout@v4
         with:
-          lfs: false  # disable auto LFS
+          lfs: true
       
-      - name: Checkout LFS objects
+      - name: Pull all LFS files
         run: |
           git lfs install
-          git lfs pull --include="model/saved_models/model.pkl"
+          git lfs pull
       
       - name: Debug - Check model file
         run: |
@@ -100,15 +101,18 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
       
-      - name: Install dependencies
+      - name: Install dependencies with version pinning
         run: |
           python -m pip install --upgrade pip
-          pip install scikit-learn numpy
+          pip install scikit-learn==${{ env.SCIKIT_LEARN_VERSION }}
+          pip install numpy pandas joblib
       
       - name: Test model loading
         run: |
           python -c "
           import pickle
+          import sklearn
+          print(f'scikit-learn version: {sklearn.__version__}')
           print('Loading model...')
           with open('model/saved_models/model.pkl', 'rb') as f:
               model = pickle.load(f)
@@ -138,11 +142,10 @@ jobs:
         with:
           lfs: true
       
-      - name: Download trained model
-        uses: actions/download-artifact@v4
-        with:
-          name: trained-model
-          path: model/saved_models/
+      - name: Pull LFS files
+        run: |
+          git lfs install
+          git lfs pull
       
       - name: Build Docker image
         run: |
@@ -211,11 +214,12 @@ jobs:
           echo "| Model Training | ${{ needs.train-model.result == 'success' && '✅ Passed' || '❌ Failed' }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Docker Build & Test | ${{ needs.build-and-test-docker.result == 'success' && '✅ Passed' || '❌ Failed' }} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Configuration" >> $GITHUB_STEP_SUMMARY
+          echo "- Python: ${{ env.PYTHON_VERSION }}" >> $GITHUB_STEP_SUMMARY
+          echo "- scikit-learn: ${{ env.SCIKIT_LEARN_VERSION }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
           echo "## Artifacts Available" >> $GITHUB_STEP_SUMMARY
-          echo "- Trained Model" >> $GITHUB_STEP_SUMMARY
-          echo "- Training Reports" >> $GITHUB_STEP_SUMMARY
+          echo "- Trained Model (fraud-detection-model)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Workflow triggered by:** ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
           echo "**Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
-
-          

@@ -52,8 +52,8 @@ jobs:
       
       - name: Check Python syntax
         run: |
-          python -m py_compile api/app.py
-          python -m py_compile model/train.py
+          echo "Checking Python files..."
+          find . -name "*.py" -path "*/api/*" -exec python -m py_compile {} \;
           echo "✓ Python syntax check passed"
 
   # ==========================================

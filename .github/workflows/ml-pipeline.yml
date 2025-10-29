@@ -151,7 +151,7 @@ jobs:
       
       - name: Build Docker image
         run: |
-          docker build -t fraud-detector:latest .
+          docker build -f api/Dockerfile -t fraud-detector:latest .
           echo "✓ Docker image built successfully"
       
       - name: Run Docker container

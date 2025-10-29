@@ -5,17 +5,16 @@ WORKDIR /app
 # Copy requirements first for better caching
 COPY requirements.txt .
 
-# Install dependencies with scikit-learn version pinned to match model
-RUN pip install --no-cache-dir scikit-learn==1.3.0 && \
+# Install dependencies with version pinning
+RUN pip install --no-cache-dir numpy==1.24.3 && \
+    pip install --no-cache-dir scikit-learn==1.3.0 && \
     pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
 COPY api/ ./api/
 COPY model/ ./model/
-COPY data/ ./data/
 
 # Environment variables
-ENV DATA_PATH=./data/creditcard.csv
 ENV MODEL_PATH=./model/saved_models/model.pkl
 ENV PORT=8000
 ENV AUTH_USERNAME=admin
